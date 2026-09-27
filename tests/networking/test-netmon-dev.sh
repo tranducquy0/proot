@@ -17,7 +17,7 @@ trap 'rm -f "$LOG"' EXIT
 # Without --netmon the extension is not even loaded: the connection
 # must still work, and nothing must be logged.
 : > "$LOG"
-${PROOT} -b /proc -r ${ROOTFS} ${ROOTFS}/bin/test-netmon-dev
+${PROOT} -b /proc ${ROOTFS}/bin/test-netmon-dev
 [ -s "$LOG" ] && {
     echo "traffic was logged although --netmon was not given" >&2
     cat "$LOG" >&2
@@ -25,7 +25,7 @@ ${PROOT} -b /proc -r ${ROOTFS} ${ROOTFS}/bin/test-netmon-dev
 }
 
 # With it, the connection is relayed and reported.
-NETMON_EXPECT_PROXY=1 ${PROOT} --netmon -b /proc -r ${ROOTFS} \
+NETMON_EXPECT_PROXY=1 ${PROOT} --netmon -b /proc \
     ${ROOTFS}/bin/test-netmon-dev
 
 # The proxy must have logged the request line and its Host header.
@@ -42,9 +42,9 @@ grep -q 'host: netmon.invalid' "$LOG" || {
 
 # The counters a synthesized /proc/net/dev reports only depend on what
 # the proxy relayed, so two identical runs have to agree exactly.
-first=$(NETMON_EXPECT_PROXY=1 ${PROOT} --netmon -b /proc -r ${ROOTFS} \
+first=$(NETMON_EXPECT_PROXY=1 ${PROOT} --netmon -b /proc \
 	${ROOTFS}/bin/test-netmon-dev | grep '^LO_TX=')
-second=$(NETMON_EXPECT_PROXY=1 ${PROOT} --netmon -b /proc -r ${ROOTFS} \
+second=$(NETMON_EXPECT_PROXY=1 ${PROOT} --netmon -b /proc \
 	${ROOTFS}/bin/test-netmon-dev | grep '^LO_TX=')
 [ -n "$first" ] || {
     echo "no loopback counter was reported" >&2
@@ -62,7 +62,7 @@ second=$(NETMON_EXPECT_PROXY=1 ${PROOT} --netmon -b /proc -r ${ROOTFS} \
 # Quiet mode keeps the counters but drops the per-request lines.
 : > "$LOG"
 NETMON_EXPECT_PROXY=1 PROOT_NETMON_QUIET=1 ${PROOT} --netmon -b /proc \
-    -r ${ROOTFS} ${ROOTFS}/bin/test-netmon-dev >/dev/null
+    ${ROOTFS}/bin/test-netmon-dev >/dev/null
 if grep -q 'GET /netmon-test' "$LOG"; then
     echo "PROOT_NETMON_QUIET was ignored" >&2
     exit 1

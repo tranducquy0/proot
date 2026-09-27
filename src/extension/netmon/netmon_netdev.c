@@ -137,8 +137,11 @@ static int popcount32(uint32_t value)
 
 /**
  * Store @name and @addr/@mask into the first free route of @shared,
- * ignoring duplicates.  Returns the index of the entry, or -1 if
- * @shared is full.
+ * ignoring duplicates.  An entry created beforehand with a null mask
+ * is a placeholder -- the default route, whose interface is known
+ * before getifaddrs(3) has described it -- so it gets its real prefix
+ * filled in when the loop finally reaches it.  Returns the index of
+ * the entry, or -1 if @shared is full.
  */
 static int add_route(NetmonShared *shared, const char *name,
 			uint32_t addr, uint32_t mask)
@@ -146,8 +149,14 @@ static int add_route(NetmonShared *shared, const char *name,
 	int index;
 
 	for (index = 0; index < shared->route_count; index++) {
-		if (strcmp(shared->routes[index].name, name) == 0)
-			return index;
+		if (strcmp(shared->routes[index].name, name) != 0)
+			continue;
+
+		if (shared->routes[index].mask == 0 && mask != 0) {
+			shared->routes[index].addr = addr;
+			shared->routes[index].mask = mask;
+		}
+		return index;
 	}
 
 	if (shared->route_count >= NETMON_MAX_IFACES)
@@ -216,12 +225,14 @@ static char *find_default_route(char *buffer, size_t size)
 }
 
 /**
- * Discover the host interfaces that the fake /proc/net/dev can report.
- * The loopback device always comes first so that the proxy can charge
- * the guest-to-proxy hop to it, then come every up, non-loopback
- * interface with an IPv4 address.  The one holding the default route
- * gets a null mask, which makes it match any destination that no more
- * specific prefix claims.
+ * Discover the host interfaces the fake /proc/net/dev can report.
+ *
+ * The loopback device always comes first, so that the proxy can charge
+ * the guest-to-proxy hop to it, and the default route comes second, so
+ * that a device with plenty of interfaces -- a phone typically has
+ * wlan0, rmnet0, ccmni0, ap0, usb0, dummy0 and more -- cannot push it
+ * out of the table.  Every other interface with an IPv4 address is then
+ * appended until the table is full.
  */
 void netmon_netdev_init(NetmonShared *shared)
 {
@@ -237,6 +248,14 @@ void netmon_netdev_init(NetmonShared *shared)
 	 * that every address here is in host byte order.  */
 	add_route(shared, "lo", (uint32_t) INADDR_LOOPBACK, 0xFF000000);
 
+	/* Claim the default route before anything else, then refine its
+	 * entry once getifaddrs(3) has given us its prefix.  A null mask
+	 * means "matches nothing in particular", so the entry is safe to
+	 * create early and is only a last resort for the lookup.  */
+	default_route = find_default_route(buffer, sizeof(buffer));
+	if (default_route != NULL)
+		shared->default_route = add_route(shared, default_route, 0, 0);
+
 	if (getifaddrs(&list) != 0) {
 		note(NULL, WARNING, SYSTEM, "netmon: getifaddrs()");
 		return;
@@ -244,6 +263,7 @@ void netmon_netdev_init(NetmonShared *shared)
 
 	for (cursor = list; cursor != NULL; cursor = cursor->ifa_next) {
 		struct sockaddr_in *address;
+		int index;
 
 		if (cursor->ifa_addr == NULL)
 			continue;
@@ -255,24 +275,20 @@ void netmon_netdev_init(NetmonShared *shared)
 			continue;
 
 		address = (struct sockaddr_in *) (void *) cursor->ifa_addr;
-		add_route(shared, cursor->ifa_name, ntohl(address->sin_addr.s_addr),
+
+		/* add_route() only fills in the prefix of an entry it
+		 * already knows about when that entry is the null-mask
+		 * placeholder, which is how the default route gets its
+		 * real prefix.  */
+		index = add_route(shared, cursor->ifa_name, ntohl(address->sin_addr.s_addr),
 			cursor->ifa_netmask != NULL
 				? ntohl(((struct sockaddr_in *) (void *) cursor->ifa_netmask)->sin_addr.s_addr)
 				: 0xFFFFFFFF);
+		if (index < 0)
+			continue;
 	}
 
 	freeifaddrs(list);
-
-	/* Remember which interface the kernel would route a non-local
-	 * destination through, without touching its prefix: a
-	 * destination on the same LAN still has to match it directly. */
-	default_route = find_default_route(buffer, sizeof(buffer));
-	if (default_route != NULL) {
-		int index = add_route(shared, default_route, 0, 0);
-
-		if (index >= 0)
-			shared->default_route = index;
-	}
 
 	/* Report the loopback device plus the first non-loopback one
 	 * even if it holds no IPv4 address, so that the guest does not
@@ -289,6 +305,21 @@ void netmon_netdev_init(NetmonShared *shared)
 			break;
 		}
 		freeifaddrs(list);
+	}
+
+	/* No default route in the routing table, which happens on the
+	 * devices that route per-uid: fall back to the first interface
+	 * that owns a prefix, so that non-local traffic is at least
+	 * billed to something better than the loopback device.  */
+	if (shared->default_route < 0) {
+		int i;
+
+		for (i = 0; i < shared->route_count; i++) {
+			if (shared->routes[i].mask != 0)
+				shared->default_route = i;
+		}
+		if (shared->default_route < 0 && shared->route_count > 1)
+			shared->default_route = 1;
 	}
 
 	shared->iface_count = shared->route_count;

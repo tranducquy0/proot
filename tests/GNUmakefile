@@ -297,7 +297,7 @@ $(ROOTFS)/bin/test-net-unix-long-path: networking/test-net-unix-long-path.c
 
 check-networking/test-netmon-dev.sh: networking/test-netmon-dev.sh setup $(ROOTFS)/bin/test-netmon-dev
 $(ROOTFS)/bin/test-netmon-dev: networking/test-netmon-dev.c
-	$(Q)$(CC) $< -o $@ $(silently) || true
+	$(Q)$(CC) -static $< -o $@ $(silently) 2>/dev/null || $(CC) $< -o $@ $(silently) || true
 check-networking/test-netmon-dev.sh: $(ROOTFS)/bin/test-netmon-dev
 	$(Q)env ROOT_RAW="$(PROOT_RAW)" PROOT="$(PROOT)" ROOTFS=$(ROOTFS) TMPDIR="$(TMPDIR)" sh -ex networking/test-netmon-dev.sh $(silently); $(call check,$(notdir networking/test-netmon-dev.sh))
 
