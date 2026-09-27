@@ -118,29 +118,30 @@ static struct in_addr find_external_address(void)
 
 /**
  * Read the byte counters of the interface @wanted out of
- * /proc/net/dev.  Returns 0 if the file could not be read or does not
- * have the shape the kernel gives it, 1 otherwise.
+ * /proc/net/dev.  Returns 1 when the file has the shape the kernel
+ * gives it and holds a row for @wanted, 0 otherwise -- in which case
+ * @path is dumped so that the failure says what was read instead.
  */
-static int read_counters(const char *wanted, long *rx, long *tx)
+static int read_counters(const char *path, const char *wanted,
+			long *rx, long *tx)
 {
 	/* bytes packets errs drop fifo frame compressed multicast
 	 * bytes packets errs drop fifo colls carrier compressed */
 	enum { NB_FIELDS = 16, TX_BYTES = 8 };
 	char line[1024];
-	int headers = 0;
-	int rows = 0;
+	int headers = 0, rows = 0, matched = 0;
 	FILE *fp;
 
 	*rx = 0;
 	*tx = 0;
 
-	fp = fopen("/proc/net/dev", "r");
+	fp = fopen(path, "r");
 	if (fp == NULL)
 		return 0;
 
 	while (fgets(line, sizeof(line), fp) != NULL) {
 		unsigned long long fields[NB_FIELDS];
-		char *colon, *cursor, *end;
+		char *colon, *name, *end, *cursor;
 		int count = 0;
 
 		if (strncmp(line, "Inter-|", 7) == 0
@@ -158,24 +159,23 @@ static int read_counters(const char *wanted, long *rx, long *tx)
 		/* The kernel right-aligns the interface name in six
 		 * columns, so trim the blanks on both sides.  */
 		*colon = '\0';
-		cursor = line;
-		while (*cursor == ' ')
-			cursor++;
-
-		for (cursor = colon; cursor > line && cursor[-1] == ' '; cursor--)
-			;
+		name = line;
+		while (*name == ' ')
+			name++;
+		cursor = colon;
+		while (cursor > name && cursor[-1] == ' ')
+			cursor--;
 		*cursor = '\0';
 
-		if (strcmp(cursor, wanted) != 0)
+		if (strcmp(name, wanted) != 0)
 			continue;
 
-		cursor = colon + 1;
-		while (count < NB_FIELDS) {
+		for (cursor = colon + 1; count < NB_FIELDS; ) {
 			unsigned long long value;
 
 			while (*cursor == ' ')
 				cursor++;
-			if (*cursor == '\0' || *cursor == '\n')
+			if (*cursor == '\0' || *cursor == '\n' || *cursor == '\r')
 				break;
 
 			value = strtoull(cursor, &end, 10);
@@ -186,16 +186,41 @@ static int read_counters(const char *wanted, long *rx, long *tx)
 			cursor = end;
 		}
 
-		if (count != NB_FIELDS)
+		if (count != NB_FIELDS) {
+			rewind(fp);
+			printf("FAIL: %s: row \"%s\" has %d fields, %d expected\n",
+				path, line, count, (int) NB_FIELDS);
+			fclose(fp);
 			return 0;
+		}
 
 		*rx = (long) fields[0];
 		*tx = (long) fields[TX_BYTES];
+		matched = 1;
 	}
 
 	fclose(fp);
 
-	return headers == 2 && rows >= 2;
+	/* A single-interface namespace is normal: an Android app runs in
+	 * its own network namespace, where /proc/net only shows lo.  */
+	if (headers != 2 || rows < 1 || !matched) {
+		FILE *dump = fopen(path, "r");
+
+		printf("FAIL: %s: %d header lines, %d interfaces, lo found: %d\n",
+			path, headers, rows, matched);
+		if (dump != NULL) {
+			int shown = 0;
+
+			while (fgets(line, sizeof(line), dump) != NULL && shown < 12) {
+				printf("  | %s", line);
+				shown++;
+			}
+			fclose(dump);
+		}
+		return 0;
+	}
+
+	return 1;
 }
 
 int main(void)
@@ -336,11 +361,11 @@ int main(void)
 
 	if (served_total == 0 || strstr(served, "GET /netmon-test") == NULL)
 		fail("the request never reached the server");
-	ok("the request reached the server through the proxy");
+	ok("the request reached the server");
 
 	if (!answered)
 		fail("no usable answer came back through the proxy");
-	ok("the answer came back through the proxy");
+	ok("the answer came back");
 
 	/* getpeername(2) must still report the address the guest asked
 	 * for rather than the loopback address of the proxy.  */
@@ -383,7 +408,7 @@ int main(void)
 		expect_proxy = (getenv("NETMON_EXPECT_PROXY") != NULL);
 
 		for (attempt = 0; attempt < 40; attempt++) {
-			if (!read_counters("lo", &rx, &tx))
+			if (!read_counters("/proc/net/dev", "lo", &rx, &tx))
 				fail("/proc/net/dev does not have the shape the "
 					"kernel gives it");
 			if (rx > 0 || attempt == 39)
