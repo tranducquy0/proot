@@ -295,6 +295,12 @@ $(ROOTFS)/bin/test-net-unix-long-path: networking/test-net-unix-long-path.c
 	$(Q)$(CC)  $< -o $@ $(silently) || true
 	$(PROOT) -b /proc -r $(ROOTFS) /bin/test-net-unix-long-path $(silently); $(call check,test-net-unix-long-path)
 
+check-networking/test-netmon-dev.sh: networking/test-netmon-dev.sh setup $(ROOTFS)/bin/test-netmon-dev
+$(ROOTFS)/bin/test-netmon-dev: networking/test-netmon-dev.c
+	$(Q)$(CC) $< -o $@ $(silently) || true
+check-networking/test-netmon-dev.sh: $(ROOTFS)/bin/test-netmon-dev
+	$(Q)env ROOT_RAW="$(PROOT_RAW)" PROOT="$(PROOT)" ROOTFS=$(ROOTFS) TMPDIR="$(TMPDIR)" sh -ex networking/test-netmon-dev.sh $(silently); $(call check,$(notdir networking/test-netmon-dev.sh))
+
 check-networking/test-net-unix-socket.c: networking/test-net-unix-socket.c setup $(ROOTFS)/bin/test-net-unix-socket
 $(ROOTFS)/bin/test-net-unix-socket: networking/test-net-unix-socket.c
 	$(Q)$(CC)  $< -o $@ $(silently) || true

@@ -67,6 +67,7 @@ static int handle_option_kill_on_exit(Tracee *tracee, const Cli *cli, const char
 static int handle_option_L(Tracee *tracee, const Cli *cli, const char *value);
 static int handle_option_H(Tracee *tracee, const Cli *cli, const char *value);
 static int handle_option_p(Tracee *tracee, const Cli *cli, const char *value);
+static int handle_option_netmon(Tracee *tracee, const Cli *cli, const char *value);
 
 static int pre_initialize_bindings(Tracee *, const Cli *, size_t, char *const *, size_t);
 static int post_initialize_exe(Tracee *, const Cli *, size_t, char *const *, size_t);
@@ -287,6 +288,29 @@ Copyright (C) 2015 STMicroelectronics, licensed under GPL v2 or later.",
           .handler = handle_option_L,
           .description = "Correct the size returned from lstat for symbolic links.",
           .detail = "",
+        },
+        { .class = "Extension options",
+          .arguments = {
+                { .name = "--netmon", .separator = '\0', .value = NULL },
+                { .name = NULL, .separator = '\0', .value = NULL } },
+          .handler = handle_option_netmon,
+          .description = "Monitor the network traffic of the tracees and report it in /proc/net/dev.",
+          .detail = "\tPRoot starts a small proxy on the loopback address and\n\
+\tredirects the outbound connections of the tracees to it, so that\n\
+\ttheir traffic can be observed without their cooperation.  The\n\
+\trequest line of the HTTP requests and the server name of the TLS\n\
+\thandshakes that go through it are logged, and what the proxy\n\
+\trelayed is reported back to the guest as a synthesized\n\
+\t/proc/net/dev, so that the usual tools (ifconfig, netstat, vnstat)\n\
+\twork inside the rootfs.\n\
+\t\n\
+\tThe redirection is limited to the TCP destination ports of the\n\
+\tPROOT_NETMON_PORTS environment variable, \"80,443,3128,8000,8080,\n\
+\t8443,8888\" by default, and never applies to the loopback or the\n\
+\tlink-local addresses, so datagrams and local services are left\n\
+\talone.  The request log goes to the standard error stream unless\n\
+\tPROOT_NETMON_LOG names a file to append it to, and\n\
+\tPROOT_NETMON_QUIET=1 turns the per-request lines off.",
         },
 	{ .class = "Alias options",
 	  .arguments = {

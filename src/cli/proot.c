@@ -346,6 +346,19 @@ static int handle_option_p(Tracee *tracee, const Cli *cli UNUSED, const char *va
         return 0;
 }
 
+static int handle_option_netmon(Tracee *tracee, const Cli *cli UNUSED, const char *value UNUSED)
+{
+	int status;
+
+	/* Start the netmon extension: it runs a local proxy and
+	 * reports the traffic it relays in /proc/net/dev.  */
+	status = initialize_extension(tracee, netmon_callback, NULL);
+	if (status < 0)
+		note(tracee, WARNING, USER, "netmon not initialized");
+
+	return 0;
+}
+
 /**
  * Initialize @tracee->qemu.
  */

@@ -58,7 +58,7 @@ Shell tests use `sh -ex` — no external test framework.
   happens BEFORE path translation (guest paths).
 - **Extensions**: plugin system intercepting syscalls. Key extensions:
   `fake_id0` (fake root), `kompat` (kernel compat), `link2symlink`,
-  `mountinfo`, `sysvipc`.
+  `mountinfo`, `netmon` (traffic monitoring), `sysvipc`.
 
 ### Source layout
 
@@ -92,3 +92,27 @@ src/
 | `src/cli/proot.c` | `-b` option parsing, `,ro` suffix handling |
 | `src/tracee/tracee.c` | Binding inheritance for child processes |
 | `src/extension/mountinfo/mountinfo.c` | Reports `ro`/`rw` in mount info |
+| `src/extension/netmon/netmon.c` | `--netmon`: connect(2) redirection, getpeername fixup |
+| `src/extension/netmon/netmon_proxy.c` | The loopback relay thread (no talloc, no note) |
+| `src/extension/netmon/netmon_netdev.c` | Interface discovery, `/proc/net/dev` rendering |
+
+### netmon flow (`--netmon`)
+
+PRoot runs a small proxy on the loopback address and diverts the
+outbound connections of the tracees through it, then reports what it
+relayed as a synthesized `/proc/net/dev`.
+
+1. `INITIALIZATION` mmaps a `NetmonShared` (counters + per-connection
+   listening sockets), then starts the relay thread.
+2. Each in-flight connection owns one loopback listening port, so the
+   relay recognises the destination from the accepted socket alone —
+   no extra syscall in the tracee, and no race with `connect(2)`.
+3. `SYSCALL_ENTER_END` on `PR_connect` claims a slot, publishes the real
+   destination, and rewrites the guest's sockaddr to the slot's port.
+   Only `AF_INET`/`AF_INET6`, never loopback or link-local, and only the
+   ports in `PROOT_NETMON_PORTS`.
+4. `SYSCALL_EXIT_END` gives the slot back if the kernel refused the
+   connection, and remembers the real destination for `getpeername`.
+5. `GUEST_PATH` then `TRANSLATED_PATH` (always the same
+   `translate_path()` call) redirect `open("/proc/net/dev")` to a
+   temporary file rendered from the shared counters.

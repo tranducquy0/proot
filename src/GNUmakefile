@@ -17,6 +17,9 @@ OBJDUMP  ?= $(CROSS_COMPILE)objdump
 CPPFLAGS += -D_FILE_OFFSET_BITS=64 -D_GNU_SOURCE -I. -I$(VPATH)
 CFLAGS   += -Wall -Wextra -O2
 LDFLAGS  += -ltalloc -Wl,-z,noexecstack
+# The netmon extension runs its proxy in a thread of PRoot itself.
+CFLAGS   += -pthread
+LDFLAGS  += -pthread
 ifdef PROOT_WITH_LIBANDROID_SHMEM
   CFLAGS += -DWITH_LIBANDROID_SHMEM
   LDFLAGS += -landroid-shmem
@@ -83,6 +86,9 @@ OBJECTS += \
 	extension/fake_id0/fake_id0.o \
 	extension/hidden_files/hidden_files.o \
 	extension/mountinfo/mountinfo.o \
+	extension/netmon/netmon.o \
+	extension/netmon/netmon_netdev.o \
+	extension/netmon/netmon_proxy.o \
 	extension/port_switch/port_switch.o \
 	extension/sysvipc/sysvipc.o \
 	extension/sysvipc/sysvipc_msg.o \
