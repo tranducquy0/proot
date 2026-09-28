@@ -314,12 +314,19 @@ int readlink_proc_pid_fd(pid_t pid, int fd, char path[PATH_MAX])
  * the current working directory).  See the documentation of
  * canonicalize() for the meaning of @deref_final.  This function
  * returns -errno if an error occured, otherwise 0.
+ *
+ * When @extended is not NULL, it is set to true if an extension
+ * replaced the translated path by a path of its own.
  */
-int translate_path(Tracee *tracee, char result[PATH_MAX], int dir_fd,
-		const char *user_path, bool deref_final)
+int translate_path_ex(Tracee *tracee, char result[PATH_MAX], int dir_fd,
+		const char *user_path, bool deref_final, bool *extended)
 {
 	char guest_path[PATH_MAX];
+	char before[PATH_MAX];
 	int status;
+
+	if (extended != NULL)
+		*extended = false;
 
 	/* Use "/" as the base if it is an absolute guest path. */
 	if (user_path[0] == '/') {
@@ -385,11 +392,34 @@ skip:
 	VERBOSE(tracee, 2, "vpid %" PRIu64 ":          -> \"%s\"",
 		tracee != NULL ? tracee->vpid : 0, result);
 
+	/* An extension gets the last word on the translated path.  Take
+	 * a copy beforehand, so that the caller can tell whether it
+	 * actually changed anything: a path an extension built itself
+	 * does not depend on its arguments only and must not be
+	 * remembered in the path cache.  */
+	if (extended != NULL && tracee->extensions != NULL) {
+		strcpy(before, result);
+	}
+
 	status = notify_extensions(tracee, TRANSLATED_PATH, (intptr_t) result, 0);
 	if (status < 0)
 		return status;
 
+	if (extended != NULL && tracee->extensions != NULL
+	    && strcmp(before, result) != 0)
+		*extended = true;
+
 	return 0;
+}
+
+/**
+ * Same as translate_path_ex() with no interest in what the
+ * extensions did with the result.
+ */
+int translate_path(Tracee *tracee, char result[PATH_MAX], int dir_fd,
+		const char *user_path, bool deref_final)
+{
+	return translate_path_ex(tracee, result, dir_fd, user_path, deref_final, NULL);
 }
 
 /**

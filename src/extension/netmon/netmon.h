@@ -169,6 +169,18 @@ typedef struct {
 		int   fd;
 		int   slot;
 		NetmonPending dest;
+
+		/* The guest's sockaddr, as it was before it was pointed
+		 * at the proxy.  The kernel only reads it, so the
+		 * substitution is undone as soon as the connect(2)
+		 * returns: the buffer belongs to the guest, which
+		 * reuses it -- a second connect(2) with the very same
+		 * sockaddr is common -- and it must never see the
+		 * address of the proxy.  */
+		word_t address;
+		int    size;
+		struct sockaddr_storage original;
+		struct sockaddr_storage redirected;
 	} connecting;
 
 	/* Set by the GUEST_PATH event and consumed by the

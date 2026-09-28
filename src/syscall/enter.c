@@ -105,6 +105,7 @@ static int translate_path2(Tracee *tracee, int dir_fd, char path[PATH_MAX], Reg 
 {
 	char new_path[PATH_MAX];
 	char cwd[PATH_MAX];
+	bool extended = false;
 	int status;
 
 	/* Special case where the argument was NULL. */
@@ -123,12 +124,16 @@ static int translate_path2(Tracee *tracee, int dir_fd, char path[PATH_MAX], Reg 
 	}
 
 	/* Translate the original path. */
-	status = translate_path(tracee, new_path, dir_fd, path, type != SYMLINK);
+	status = translate_path_ex(tracee, new_path, dir_fd, path, type != SYMLINK, &extended);
 	if (status < 0)
 		return status;
 
-	/* Store successful translation in cache.  */
-	if (type == REGULAR && dir_fd == AT_FDCWD && tracee->fs->path_cache != NULL) {
+	/* Store successful translation in cache, unless an extension had
+	 * the last word on it: the path it built depends on more than the
+	 * arguments of the translation, so serving it back from the cache
+	 * would hand the tracee a stale answer.  */
+	if (!extended
+	    && type == REGULAR && dir_fd == AT_FDCWD && tracee->fs->path_cache != NULL) {
 		if (getcwd2(tracee, cwd) == 0) {
 			path_cache_store(tracee->fs->path_cache, path, cwd,
 					 dir_fd, new_path, false);

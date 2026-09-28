@@ -79,6 +79,17 @@ extern void chop_finality(char *path);
 extern int translate_path(Tracee *tracee, char host_path[PATH_MAX],
 			int dir_fd, const char *guest_path, bool deref_final);
 
+/**
+ * Same as translate_path(), except that *@extended is set to true when
+ * an extension rewrote the translated path.  Such a translation is not
+ * a function of its arguments alone -- the netmon proxy, for instance,
+ * points /proc/net/dev at a file it renders from the traffic it has
+ * relayed so far -- and therefore must not be memoized.
+ */
+extern int translate_path_ex(Tracee *tracee, char host_path[PATH_MAX],
+			int dir_fd, const char *guest_path, bool deref_final,
+			bool *extended);
+
 extern int detranslate_path(Tracee *tracee, char path[PATH_MAX], const char t_referrer[PATH_MAX]);
 extern bool belongs_to_guestfs(const Tracee *tracee, const char *path);
 

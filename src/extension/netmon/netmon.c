@@ -319,6 +319,10 @@ static bool redirect_connect(NetmonState *state, Tracee *tracee, word_t address)
 	state->connecting.fd = fd;
 	state->connecting.slot = slot;
 	state->connecting.dest = *destination;
+	state->connecting.address = address;
+	state->connecting.size = size;
+	state->connecting.original = original;
+	state->connecting.redirected = redirected;
 
 	VERBOSE(tracee, 2, "netmon: connect(%d, %s port %u) redirected to slot %d",
 		fd, (family == AF_INET) ? "inet" : "inet6", port, slot);
@@ -342,6 +346,29 @@ static void redirect_connect_exit(NetmonState *state, Tracee *tracee)
 		return;
 
 	result = (int) peek_reg(tracee, CURRENT, SYSARG_RESULT);
+
+	/* Undo the substitution before anything else, and whatever the
+	 * kernel decided: the guest is free to look at that buffer
+	 * again as soon as connect(2) has returned, and it is free to
+	 * hand it over to a new connect(2), which would then aim at
+	 * the proxy without the tracer ever seeing it.  */
+	if (state->connecting.address != 0) {
+		struct sockaddr_storage current;
+
+		/* But only if the buffer still holds what was written
+		 * into it.  It belongs to the guest and may have been
+		 * reused for something else in the meantime, in which
+		 * case it is not this extension's to write to.  */
+		if (read_data(tracee, &current, state->connecting.address,
+					(word_t) state->connecting.size) == 0
+		    && memcmp(&current, &state->connecting.redirected,
+				(size_t) state->connecting.size) == 0)
+			(void) write_data(tracee, state->connecting.address,
+					&state->connecting.original,
+					(word_t) state->connecting.size);
+
+		state->connecting.address = 0;
+	}
 
 	/* A non-blocking connect(2) legitimately reports that it is
 	 * still in progress.  */

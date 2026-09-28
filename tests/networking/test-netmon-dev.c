@@ -119,8 +119,9 @@ static struct in_addr find_external_address(void)
 /**
  * Read the byte counters of the interface @wanted out of
  * /proc/net/dev.  Returns 1 when the file has the shape the kernel
- * gives it and holds a row for @wanted, 0 otherwise -- in which case
- * @path is dumped so that the failure says what was read instead.
+ * gives it and holds a row for @wanted, 0 when it does not -- in which
+ * case @path is dumped so that the failure says what was read instead
+ * -- and -1 when it could not be opened at all.
  */
 static int read_counters(const char *path, const char *wanted,
 			long *rx, long *tx)
@@ -137,7 +138,7 @@ static int read_counters(const char *path, const char *wanted,
 
 	fp = fopen(path, "r");
 	if (fp == NULL)
-		return 0;
+		return -1;
 
 	while (fgets(line, sizeof(line), fp) != NULL) {
 		unsigned long long fields[NB_FIELDS];
@@ -247,6 +248,16 @@ int main(void)
 	server_fd = socket(AF_INET, SOCK_STREAM, 0);
 	if (server_fd < 0)
 		skip("no TCP socket available");
+
+	/* The shell script runs this helper several times in a row on
+	 * the same port, and the side that closes first lingers in
+	 * TIME_WAIT: without this the second bind(2) fails and every
+	 * run after the first one would just skip.  */
+	{
+		int reuse = 1;
+
+		setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+	}
 
 	memset(&address, 0, sizeof(address));
 	address.sin_family = AF_INET;
@@ -408,12 +419,38 @@ int main(void)
 		expect_proxy = (getenv("NETMON_EXPECT_PROXY") != NULL);
 
 		for (attempt = 0; attempt < 40; attempt++) {
-			if (!read_counters("/proc/net/dev", "lo", &rx, &tx))
-				fail("/proc/net/dev does not have the shape the "
-					"kernel gives it");
-			if (rx > 0 || attempt == 39)
+			int status = read_counters("/proc/net/dev", "lo", &rx, &tx);
+
+			if (status > 0) {
+				if (rx > 0 || attempt == 39)
+					break;
+				/* The relay has not closed the connection
+				 * yet, ask again in a moment.  */
+				usleep(50000);
+				continue;
+			}
+
+			if (status < 0) {
+				if (expect_proxy) {
+					/* With the proxy in the way this file
+					 * is synthesized, so it must be there.  */
+					fail("/proc/net/dev could not be read");
+				}
+
+				/* Without the proxy the guest reads the host's
+				 * own /proc/net/dev, which an unprivileged
+				 * process is not always allowed to open at
+				 * all -- Android denies the whole of
+				 * /proc/net.  That is none of this
+				 * extension's business: it has to leave the
+				 * host's file alone, and it did.  */
+				printf("SKIP: %s is not readable\n",
+					"/proc/net/dev");
 				break;
-			usleep(50000);
+			}
+
+			fail("/proc/net/dev does not have the shape the "
+				"kernel gives it");
 		}
 
 		if (expect_proxy) {
